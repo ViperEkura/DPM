@@ -1,2 +1,6 @@
 # Python
 __pycache__/
+
+# dataset and model
+data/*
+*.pth

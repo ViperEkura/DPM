@@ -136,7 +136,7 @@ class GaussianDiffusion:
         for i in tqdm(reversed(range(0, self.timesteps)), desc='sampling loop time step', total=self.timesteps):
             t = torch.full((batch_size,), i, device=device, dtype=torch.long)
             img = self.p_sample(model, img, t)
-            imgs.append(img.cpu().numpy())
+            imgs.append(img)
         return imgs
 
     def train_losses(self, model, x_start: torch.FloatTensor, t: torch.LongTensor):
