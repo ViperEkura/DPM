@@ -2,7 +2,9 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from tqdm import tqdm
+from torch import Tensor
 
 
 def linear_beta_schedule(timesteps):
@@ -61,14 +63,14 @@ class GaussianDiffusion:
         self.posterior_mean_coef1 = self.betas * torch.sqrt(self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
         self.posterior_mean_coef2 = (1.0 - self.alphas_cumprod_prev) * torch.sqrt(self.alphas) / (1.0 - self.alphas_cumprod)
 
-    def _extract(self, a: torch.FloatTensor, t: torch.LongTensor, x_shape):
+    def _extract(self, a: Tensor, t: Tensor, x_shape):
         # get the param of given timestep t
         batch_size = t.shape[0]
         out = a.to(t.device).gather(0, t).float()
         out = out.reshape(batch_size, *((1,) * (len(x_shape) - 1)))
         return out
 
-    def q_sample(self, x_start: torch.FloatTensor, t: torch.LongTensor, noise=None):
+    def q_sample(self, x_start: Tensor, t: Tensor, noise=None):
         # forward diffusion (using the nice property): q(x_t | x_0)
         if noise is None:
             noise = torch.randn_like(x_start)
@@ -78,14 +80,14 @@ class GaussianDiffusion:
 
         return sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
 
-    def q_mean_variance(self, x_start: torch.FloatTensor, t: torch.LongTensor):
+    def q_mean_variance(self, x_start: Tensor, t: Tensor):
         # Get the mean and variance of q(x_t | x_0).
         mean = self._extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start
         variance = self._extract(1.0 - self.alphas_cumprod, t, x_start.shape)
         log_variance = self._extract(self.log_one_minus_alphas_cumprod, t, x_start.shape)
         return mean, variance, log_variance
 
-    def q_posterior_mean_variance(self, x_start: torch.FloatTensor, x_t: torch.FloatTensor, t: torch.LongTensor):
+    def q_posterior_mean_variance(self, x_start: Tensor, x_t: Tensor, t: Tensor):
         # Compute the mean and variance of the diffusion posterior: q(x_{t-1} | x_t, x_0)
         posterior_mean = (
             self._extract(self.posterior_mean_coef1, t, x_t.shape) * x_start
@@ -95,14 +97,14 @@ class GaussianDiffusion:
         posterior_log_variance_clipped = self._extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def predict_start_from_noise(self, x_t: torch.FloatTensor, t: torch.LongTensor, noise: torch.FloatTensor):
+    def predict_start_from_noise(self, x_t: Tensor, t: Tensor, noise: Tensor):
         # compute x_0 from x_t and pred noise: the reverse of `q_sample`
         return (
             self._extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
             self._extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
         )
 
-    def p_mean_variance(self, model, x_t: torch.FloatTensor, t: torch.LongTensor, clip_denoised=True):
+    def p_mean_variance(self, model, x_t: Tensor, t: Tensor, clip_denoised=True):
         # compute predicted mean and variance of p(x_{t-1} | x_t)
         # predict noise using model
         pred_noise = model(x_t, t)
@@ -114,7 +116,7 @@ class GaussianDiffusion:
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
-    def p_sample(self, model, x_t: torch.FloatTensor, t: torch.LongTensor, clip_denoised=True):
+    def p_sample(self, model, x_t: Tensor, t: Tensor, clip_denoised=True):
         # denoise_step: sample x_{t-1} from x_t and pred_noise
         # predict mean and variance
         model_mean, _, model_log_variance = self.p_mean_variance(model, x_t, t, clip_denoised=clip_denoised)
@@ -139,10 +141,93 @@ class GaussianDiffusion:
             imgs.append(img)
         return imgs
 
-    def train_losses(self, model, x_start: torch.FloatTensor, t: torch.LongTensor):
+    def train_losses(self, model, x_start: Tensor, t: Tensor):
         # compute train losses
         noise = torch.randn_like(x_start)  # random noise ~ N(0, 1)
         x_noisy = self.q_sample(x_start, t, noise=noise)  # x_t ~ q(x_t | x_0)
         predicted_noise = model(x_noisy, t)  # predict noise from noisy image
         loss = F.mse_loss(noise, predicted_noise)
         return loss
+
+
+class DDIM(GaussianDiffusion):
+    """
+    Denoising Diffusion Implicit Models (DDIM) sampler.
+    Inherits from GaussianDiffusion and adds a DDIM sampling method.
+    """
+    def __init__(self, timesteps=1000, beta_schedule='linear'):
+        super().__init__(timesteps, beta_schedule)
+
+    @torch.no_grad()
+    def ddim_sample(self, model: nn.Module, image_size, batch_size=8, channels=3,
+                    n_steps=50, eta=0.0, clip_denoised=True):
+        """
+        Sample using DDIM with a reduced number of steps.
+
+        Args:
+            model: noise prediction model (usually a UNet)
+            image_size: spatial size of images (height = width)
+            batch_size: number of images to sample
+            channels: number of image channels
+            n_steps: number of sampling steps (must be <= timesteps)
+            eta: stochasticity parameter (0 -> deterministic, 1 -> DDPM-like)
+            clip_denoised: whether to clip predicted x0 to [-1, 1]
+
+        Returns:
+            List of images at each DDIM step (including the final result).
+        """
+        device = next(model.parameters()).device
+        shape = (batch_size, channels, image_size, image_size)
+
+        # Create a sequence of timesteps from T to 0, spaced uniformly
+        # We use n_steps points, including the first (T) and last (0)
+        step_indices = torch.linspace(0, self.timesteps - 1, n_steps, dtype=torch.long, device=device)
+        # Reverse so we go from T down to 0
+        timesteps = torch.flip(step_indices, dims=[0])
+
+        # Start from pure noise
+        img = torch.randn(shape, device=device)   # x_T
+        imgs = [img.cpu()]   # optionally store intermediate results
+
+        # Iterate over the sequence, except the last step (t=0) which gives the final image
+        for i in tqdm(range(len(timesteps) - 1), desc='DDIM sampling', total=len(timesteps)-1):
+            t = timesteps[i]                # current step
+            t_next = timesteps[i + 1]       # next step (smaller)
+
+            # Prepare tensors of shape (batch_size,) for index extraction
+            t_batch = torch.full((batch_size,), t, device=device, dtype=torch.long)
+            t_next_batch = torch.full((batch_size,), t_next, device=device, dtype=torch.long)
+
+            # 1. Predict noise using the model
+            pred_noise = model(img, t_batch)
+
+            # 2. Extract cumulative alphas for current and next step
+            alpha_t = self._extract(self.alphas_cumprod, t_batch, img.shape)      # ᾱ_t
+            alpha_next = self._extract(self.alphas_cumprod, t_next_batch, img.shape)  # ᾱ_s
+
+            # 3. Compute sigma (stochastic component)
+            # sigma = η * √((1-ᾱ_s)/(1-ᾱ_t)) * √(1-ᾱ_t/ᾱ_s)
+            # This formulation ensures the variance matches DDPM when η=1.
+            sigma = eta * torch.sqrt((1 - alpha_next) / (1 - alpha_t)) * torch.sqrt(1 - alpha_t / alpha_next)
+            # Clamp for numerical safety
+            sigma = torch.clamp(sigma, min=0.0)
+
+            # 4. Predict x0 from current x_t and predicted noise
+            pred_x0 = (img - torch.sqrt(1 - alpha_t) * pred_noise) / torch.sqrt(alpha_t)
+            if clip_denoised:
+                pred_x0 = torch.clamp(pred_x0, -1., 1.)
+
+            # 5. Compute direction pointing to x_t (the "predicted" part)
+            # Direction coefficient: √(1-ᾱ_s - σ²)
+            dir_coeff = torch.sqrt(torch.clamp(1 - alpha_next - sigma**2, min=0.0))
+            dir_xt = dir_coeff * pred_noise
+
+            # 6. Generate random noise if eta > 0, otherwise zero
+            noise = torch.randn_like(img) if eta > 0 else 0.0
+
+            # 7. Update to x_s (x_{t_next})
+            img = torch.sqrt(alpha_next) * pred_x0 + dir_xt + sigma * noise
+
+            imgs.append(img.cpu())
+
+        return imgs

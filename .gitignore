@@ -2,5 +2,6 @@
 __pycache__/
 
 # dataset and model
-data/*
+*-ubyte
+*-ubyte.gz
 *.pth
