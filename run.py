@@ -202,7 +202,7 @@ def show(model, sampler_type='ddim'):
     print(f"- Final image shape: {final_images.shape}")
 
 def main():
-    
+    torch.manual_seed(42)
     model = load_checkpoint()
     
     if model is None:
