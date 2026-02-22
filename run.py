@@ -7,12 +7,14 @@ from dpm.diffuser import DDIM, GaussianDiffusion, TaylorSeer
 from dpm.modules import UNet
 
 
-timesteps = 500
 CHECKPOINT_PATH = "checkpoints/diffusion_model.pth"
+timesteps = 500
+
 
 def train():
     batch_size = 64
-
+    epochs = 10
+    
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5], std=[0.5])
@@ -32,11 +34,10 @@ def train():
         attention_resolutions=[]
     )
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4, weight_decay=1e-5)
     gaussian_diffusion = GaussianDiffusion(timesteps=timesteps)
 
     # train
-    epochs = 10
     for epoch in range(epochs):
         for step, (images, labels) in enumerate(train_loader):
             optimizer.zero_grad()
@@ -47,7 +48,6 @@ def train():
             # sample t uniformally for every example in the batch
             t = torch.randint(0, timesteps, (batch_size,), device=device).long()
             
-            # 使用混合精度训练
             if device == "cuda":
                 with torch.autocast("cuda", torch.bfloat16):
                     loss = gaussian_diffusion.train_losses(model, images, t)
@@ -60,7 +60,6 @@ def train():
             loss.backward()
             optimizer.step()
     
-    # 训练完成后保存检查点
     print(f"Training completed. Saving checkpoint to {CHECKPOINT_PATH}")
     os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
     torch.save({
@@ -72,7 +71,6 @@ def train():
     return model
 
 def load_checkpoint():
-    """加载检查点"""
     if not os.path.exists(CHECKPOINT_PATH):
         print(f"No checkpoint found at {CHECKPOINT_PATH}")
         return None
@@ -95,7 +93,7 @@ def load_checkpoint():
     return model
 
 def show(model, sampler_type='ddim'):
-
+    torch.manual_seed(42)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
     model.eval()
@@ -140,12 +138,10 @@ def show(model, sampler_type='ddim'):
     
     print(f"Generated {len(generated_images)} steps of images")
 
-    # 显示最终生成的图像（8x8网格）
     print("Showing final generated images...")
     fig = plt.figure(figsize=(12, 12), constrained_layout=True)
     gs = fig.add_gridspec(8, 8)
 
-    # 取最后一步（最清晰的图像）
     final_images = generated_images[-1].cpu()  # [64, 1, 28, 28]
     
     imgs = final_images.reshape(8, 8, 28, 28)
@@ -159,16 +155,14 @@ def show(model, sampler_type='ddim'):
     plt.suptitle(f"Generated MNIST Digits ({sampler_type.upper()} Sampling)", fontsize=16)
     plt.savefig(f"generated_images_{sampler_type}.png", dpi=150, bbox_inches='tight')
 
-
     # 显示去噪步骤
     print("Showing denoising steps...")
     fig = plt.figure(figsize=(16, 10), constrained_layout=True)
-    nrows = 8  # 显示8个样本
-    ncols = 16  # 显示16个时间点
+    nrows = 8   # sample
+    ncols = 16  # timestep
     
     gs = fig.add_gridspec(nrows, ncols)
     
-    # 在生成的步骤中均匀选择 ncols 个时间点
     step_indices = torch.linspace(0, len(generated_images)-1, ncols, dtype=torch.long)
     
     for row in range(nrows):
@@ -202,7 +196,6 @@ def show(model, sampler_type='ddim'):
     print(f"- Final image shape: {final_images.shape}")
 
 def main():
-    torch.manual_seed(42)
     model = load_checkpoint()
     
     if model is None:
@@ -211,7 +204,7 @@ def main():
     else:
         print("Checkpoint loaded. Skipping training.")
 
-    show(model, "taylor")
+    show(model, "ddpm")
 
 if __name__ == "__main__":
     main()
