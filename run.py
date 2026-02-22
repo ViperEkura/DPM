@@ -1,9 +1,11 @@
 import os
-from matplotlib import pyplot as plt
 import torch
+
+from matplotlib import pyplot as plt
 from torchvision import datasets, transforms
+from dpm.diffuser import DDIM, GaussianDiffusion
 from dpm.modules import UNet
-from dpm.diffuser import GaussianDiffusion
+
 
 timesteps = 500
 CHECKPOINT_PATH = "checkpoints/diffusion_model.pth"
@@ -34,7 +36,7 @@ def train():
     gaussian_diffusion = GaussianDiffusion(timesteps=timesteps)
 
     # train
-    epochs = 2
+    epochs = 10
     for epoch in range(epochs):
         for step, (images, labels) in enumerate(train_loader):
             optimizer.zero_grad()
@@ -92,75 +94,114 @@ def load_checkpoint():
     print(f"Checkpoint loaded successfully (timesteps: {checkpoint.get('timesteps', 'N/A')})")
     return model
 
-def show(model):
-    """显示生成的图像"""
+def show(model, sampler_type='ddim'):
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
-    model.eval()  # 切换到评估模式
+    model.eval()
     
     batch_size = 64
-    gaussian_diffusion = GaussianDiffusion(timesteps=timesteps)
     
-    # 生成图像
+    if sampler_type.lower() == 'ddpm':
+        print(f"Using DDPM sampler with {timesteps} steps...")
+        sampler = GaussianDiffusion(timesteps=timesteps)
+    else:  # ddim
+        n_steps_ddim = 50 
+        print(f"Using DDIM sampler with {n_steps_ddim} steps...")
+        sampler = DDIM(timesteps=timesteps)
+    
     print("Generating images...")
     with torch.no_grad():
-        generated_images = gaussian_diffusion.sample(model, 28, batch_size=batch_size, channels=1)
+        if sampler_type.lower() == 'ddpm':
+            generated_images = sampler.sample(
+                model, 
+                28, 
+                batch_size=batch_size, 
+                channels=1
+            )
+        else:
+            generated_images = sampler.ddim_sample(
+                model, 
+                28, 
+                batch_size=batch_size, 
+                channels=1,
+                n_steps=n_steps_ddim,
+                eta=0.0
+            )
     
-    # generated_images: [timesteps, batch_size=64, channels=1, height=28, width=28]
+    print(f"Generated {len(generated_images)} steps of images")
 
     # 显示最终生成的图像（8x8网格）
     print("Showing final generated images...")
     fig = plt.figure(figsize=(12, 12), constrained_layout=True)
     gs = fig.add_gridspec(8, 8)
 
-    imgs = generated_images[-1].cpu().reshape(8, 8, 28, 28)
+    # 取最后一步（最清晰的图像）
+    final_images = generated_images[-1].cpu()  # [64, 1, 28, 28]
+    
+    imgs = final_images.reshape(8, 8, 28, 28)
     for n_row in range(8):
         for n_col in range(8):
             f_ax = fig.add_subplot(gs[n_row, n_col])
-            # 反归一化：从[-1, 1]转换到[0, 255]
             img = (imgs[n_row, n_col] + 1.0) * 127.5
-            f_ax.imshow(img, cmap="gray")
+            f_ax.imshow(img.squeeze(), cmap="gray")
             f_ax.axis("off")
     
-    plt.suptitle("Generated MNIST Digits", fontsize=16)
-    plt.savefig("generated_images.png", dpi=150, bbox_inches='tight')
-    plt.show()
+    plt.suptitle(f"Generated MNIST Digits ({sampler_type.upper()} Sampling)", fontsize=16)
+    plt.savefig(f"generated_images_{sampler_type}.png", dpi=150, bbox_inches='tight')
 
-    # 显示去噪步骤（16个时间点）
+
+    # 显示去噪步骤
     print("Showing denoising steps...")
-    fig = plt.figure(figsize=(12, 12), constrained_layout=True)
-    nrows = 16
-    gs = fig.add_gridspec(nrows, 16)
+    fig = plt.figure(figsize=(16, 10), constrained_layout=True)
+    nrows = 8  # 显示8个样本
+    ncols = 16  # 显示16个时间点
     
-    for n_row in range(nrows):
-        for n_col in range(16):
-            f_ax = fig.add_subplot(gs[n_row, n_col])
-            t_idx = (timesteps // 16) * n_col if n_col < 15 else -1
-            img = generated_images[t_idx][n_row].cpu().reshape(28, 28)
-            # 反归一化
-            img = (img + 1.0) * 127.5
-            f_ax.imshow(img, cmap="gray")
+    gs = fig.add_gridspec(nrows, ncols)
+    
+    # 在生成的步骤中均匀选择 ncols 个时间点
+    step_indices = torch.linspace(0, len(generated_images)-1, ncols, dtype=torch.long)
+    
+    for row in range(nrows):
+        for col in range(ncols):
+            f_ax = fig.add_subplot(gs[row, col])
+            
+            t_idx = step_indices[col].item()
+            img = generated_images[t_idx][row].cpu()
+            
+            img_display = (img + 1.0) * 127.5
+            f_ax.imshow(img_display.squeeze(), cmap="gray")
             f_ax.axis("off")
+            
+            if row == 0:
+                if sampler_type.lower() == 'ddpm':
+                    # DDPM: 显示实际的时间步（从T到0）
+                    actual_t = timesteps - (t_idx * timesteps // len(generated_images))
+                    step_info = f"t={actual_t}"
+                else:
+                    # DDIM: 显示步骤索引
+                    step_info = f"step={t_idx}"
+                f_ax.set_title(step_info, fontsize=8)
     
-    plt.suptitle("Denoising Steps (16 samples, 16 timesteps)", fontsize=16)
-    plt.savefig("denoising_steps.png", dpi=150, bbox_inches='tight')
+    plt.suptitle(f"{sampler_type.upper()} Denoising Steps (8 samples × 16 timesteps)", fontsize=16)
+    plt.savefig(f"denoising_steps_{sampler_type}.png", dpi=150, bbox_inches='tight')
 
+
+    # 打印采样信息
+    print(f"\nSampling completed using {sampler_type.upper()}:")
+    print(f"- Total steps: {len(generated_images)}")
+    print(f"- Final image shape: {final_images.shape}")
 
 def main():
-    """主函数"""
-    print(f"CUDA available: {torch.cuda.is_available()}")
     
-    # 尝试加载检查点
     model = load_checkpoint()
     
     if model is None:
-        # 如果没有检查点，则开始训练
         print("No checkpoint found. Starting training...")
         model = train()
     else:
         print("Checkpoint loaded. Skipping training.")
-    
-    # 显示生成的图像
+
     show(model)
 
 if __name__ == "__main__":
