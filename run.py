@@ -3,7 +3,7 @@ import torch
 
 from matplotlib import pyplot as plt
 from torchvision import datasets, transforms
-from dpm.diffuser import DDIM, GaussianDiffusion
+from dpm.diffuser import DDIM, GaussianDiffusion, TaylorSeer
 from dpm.modules import UNet
 
 
@@ -105,29 +105,38 @@ def show(model, sampler_type='ddim'):
     if sampler_type.lower() == 'ddpm':
         print(f"Using DDPM sampler with {timesteps} steps...")
         sampler = GaussianDiffusion(timesteps=timesteps)
-    else:  # ddim
+        generated_images = sampler.sample(
+            model, 
+            28, 
+            batch_size=batch_size, 
+            channels=1
+        )
+    elif sampler_type.lower() == 'ddim': 
         n_steps_ddim = 50 
         print(f"Using DDIM sampler with {n_steps_ddim} steps...")
         sampler = DDIM(timesteps=timesteps)
-    
-    print("Generating images...")
-    with torch.no_grad():
-        if sampler_type.lower() == 'ddpm':
-            generated_images = sampler.sample(
-                model, 
-                28, 
-                batch_size=batch_size, 
-                channels=1
-            )
-        else:
-            generated_images = sampler.ddim_sample(
-                model, 
-                28, 
-                batch_size=batch_size, 
-                channels=1,
-                n_steps=n_steps_ddim,
-                eta=0.0
-            )
+        generated_images = sampler.sample(
+            model, 
+            28, 
+            batch_size=batch_size, 
+            channels=1,
+            n_steps=n_steps_ddim,
+            eta=0.0
+        )
+    else:
+        n_steps_ddim = 50 
+        sampler = TaylorSeer(timesteps=timesteps)
+        generated_images = sampler.sample(
+            model, 
+            28, 
+            batch_size=batch_size, 
+            channels=1,
+            n_steps=n_steps_ddim,
+            taylor_ratio=0.5,
+            taylor_order=2,
+            eta=0.0,
+            min_model_steps=3
+        )
     
     print(f"Generated {len(generated_images)} steps of images")
 
@@ -202,7 +211,7 @@ def main():
     else:
         print("Checkpoint loaded. Skipping training.")
 
-    show(model)
+    show(model, "taylor")
 
 if __name__ == "__main__":
     main()
