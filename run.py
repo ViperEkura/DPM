@@ -5,6 +5,7 @@ from matplotlib import pyplot as plt
 from torchvision import datasets, transforms
 from dpm.diffuser import DDIM, GaussianDiffusion
 from dpm.modules import UNet
+from dpm.inference import DeepCacheWrapper
 
 
 CHECKPOINT_PATH = "checkpoints/diffusion_model.pth"
@@ -95,8 +96,8 @@ def load_checkpoint():
 def show(model, sampler_type='ddim'):
     torch.manual_seed(42)
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = DeepCacheWrapper(model, cache_interval=4)
     model = model.to(device)
-    model.eval()
     
     batch_size = 64
     
