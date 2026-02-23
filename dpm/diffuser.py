@@ -30,83 +30,51 @@ def cosine_beta_schedule(timesteps, s=0.008):
     return torch.clip(betas, 0, 0.999)
 
 
-def taylor_prediction(
+def taylor_extrapolate(
     features_cache: List[Tensor], 
-    delta_t: float, 
     order: int = 2,
     device: Optional[str] = None
 ) -> Tensor:
     """
-    Predict next feature using Taylor expansion of arbitrary order.
+    Predict next feature using Taylor expansion with finite difference derivatives.
     
-    Taylor expansion formula:
-    f(t) ≈ f(t-Δt) + f'(t-Δt)Δt + (1/2!)f''(t-Δt)Δt² + ... + (1/k!)f^(k)(t-Δt)Δt^k
+    Equivalent to:
+        P^k(x_t) = sum_{n=0}^{k} (1/n!)  sum_{m=0}^{n} (-1)^m  C(n, m)  f(x_{t - (1 + m)})
     
     Args:
-        features_cache: List of cached features from previous time steps
-                       features_cache[-1] = f(t-Δt)
-                       features_cache[-2] = f(t-2Δt)
-                       features_cache[-3] = f(t-3Δt), etc.
-        delta_t: Time interval between consecutive steps (Δt)
-        order: Order of Taylor expansion (must be <= len(features_cache)-1)
-        device: Device for torch tensors (if applicable)
-    
+        features_cache: [f(t-Δt), f(t-2Δt), ..., f(t-LΔt)] (L >= order + 1)
+        order: Taylor expansion order (k)
+        device: target device
     Returns:
-        predicted_feature: Predicted feature at current time step f(t)
-    
-    Raises:
-        ValueError: If cache size is insufficient for the requested order
+        predicted_feature: f(t) approximation
     """
-    
-    # Check if we have enough cached features
-    required_cache_size = order + 1
-    if len(features_cache) < required_cache_size:
+    if len(features_cache) < order + 1:
         raise ValueError(
             f"Cache size ({len(features_cache)}) insufficient for order {order}. "
-            f"Need at least {required_cache_size} features."
+            f"Need at least {order + 1} features."
         )
     
-    # Determine tensor type and device
+    # Determine device
     if device is None:
         device = features_cache[0].device
     
-    # Start with the most recent feature f(t-Δt)
-    prediction = features_cache[-1].clone().to(device)
+    # Move all needed features to device (only first order+1 are used)
+    # features[m] = f(t - (m+1)Δt) for m = 0, 1, ..., order
+    feats = [features_cache[-(m + 1)].to(device) for m in range(order + 1)]
     
-    # Compute each order term and add to prediction
-    for k in range(1, order + 1):
-        # Compute k-th order derivative using finite differences
-        # Formula: f^(k)(t-Δt) ≈ (1/Δt^k) * Σ_{i=0}^{k} (-1)^i * C(k,i) * f(t - (i+1)Δt)
-        
-        derivative = torch.zeros_like(features_cache[-1], device=device)
-        
-        # Calculate using binomial coefficients
-        for i in range(k + 1):
-            # Binomial coefficient C(k,i)
-            binom_coeff = math.comb(k, i)
-            
-            # Sign: (-1)^i
-            sign = (-1) ** i
-            
-            # Get the corresponding feature: f(t - (i+1)Δt)
-            # Note: features_cache[-1] is f(t-Δt), features_cache[-2] is f(t-2Δt), etc.
-            feature_idx = -(i + 1)  # -1, -2, -3, ...
-            feature_value = features_cache[feature_idx].to(device)
-            
-            # Add term to derivative
-            derivative += sign * binom_coeff * feature_value
-   
-        
-        # Divide by Δt^k to get the k-th derivative
-        derivative = derivative / (delta_t ** k)
-        
-        # Taylor term: (1/k!) * f^(k)(t-Δt) * Δt^k
-        taylor_term = derivative * (delta_t ** k) / math.factorial(k)
-        
-        # Add to prediction
-        prediction = prediction + taylor_term
+    # Initialize prediction as zero tensor of same shape
+    pred = torch.zeros_like(feats[0])
+
+    # Outer sum over n = 0 to order
+    for n in range(order + 1):
+        inner_sum = torch.zeros_like(feats[0])
+        # Inner sum over m = 0 to n
+        for m in range(n + 1):
+            coeff = ((-1) ** m) * math.comb(n, m)
+            inner_sum += coeff * feats[m]  # feats[m] = f(t - (m+1)Δt)
+        pred += inner_sum / math.factorial(n)
     
-    return prediction
+    return pred
 
 
 class GaussianDiffusion:
@@ -404,9 +372,8 @@ class TaylorSeer(DDIM):
             else:
                 # Predict via Taylor
                 if len(noise_cache) >= taylor_order + 1:
-                    pred_noise = taylor_prediction(
+                    pred_noise = taylor_extrapolate(
                         features_cache=noise_cache[-(taylor_order + 1):],
-                        delta_t=1.0,
                         order=taylor_order,
                         device=device
                     )
