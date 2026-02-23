@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from tqdm import tqdm
 from torch import Tensor
-from typing import List, Optional
+
 
 def linear_beta_schedule(timesteps):
     """
@@ -28,53 +28,6 @@ def cosine_beta_schedule(timesteps, s=0.008):
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
-
-
-def taylor_extrapolate(
-    features_cache: List[Tensor], 
-    order: int = 2,
-    device: Optional[str] = None
-) -> Tensor:
-    """
-    Predict next feature using Taylor expansion with finite difference derivatives.
-    
-    Equivalent to:
-        P^k(x_t) = sum_{n=0}^{k} (1/n!)  sum_{m=0}^{n} (-1)^m  C(n, m)  f(x_{t - (1 + m)})
-    
-    Args:
-        features_cache: [f(t-Δt), f(t-2Δt), ..., f(t-LΔt)] (L >= order + 1)
-        order: Taylor expansion order (k)
-        device: target device
-    Returns:
-        predicted_feature: f(t) approximation
-    """
-    if len(features_cache) < order + 1:
-        raise ValueError(
-            f"Cache size ({len(features_cache)}) insufficient for order {order}. "
-            f"Need at least {order + 1} features."
-        )
-    
-    # Determine device
-    if device is None:
-        device = features_cache[0].device
-    
-    # Move all needed features to device (only first order+1 are used)
-    # features[m] = f(t - (m+1)Δt) for m = 0, 1, ..., order
-    feats = [features_cache[-(m + 1)].to(device) for m in range(order + 1)]
-    
-    # Initialize prediction as zero tensor of same shape
-    pred = torch.zeros_like(feats[0])
-
-    # Outer sum over n = 0 to order
-    for n in range(order + 1):
-        inner_sum = torch.zeros_like(feats[0])
-        # Inner sum over m = 0 to n
-        for m in range(n + 1):
-            coeff = ((-1) ** m) * math.comb(n, m)
-            inner_sum += coeff * feats[m]  # feats[m] = f(t - (m+1)Δt)
-        pred += inner_sum / math.factorial(n)
-    
-    return pred
 
 
 class GaussianDiffusion:
@@ -311,81 +264,6 @@ class DDIM(GaussianDiffusion):
             # Perform one DDIM step
             img = self.ddim_step(img, t, t_next, eta, clip_denoised, model=model)
 
-            imgs.append(img)
-
-        return imgs
-
-
-class TaylorSeer(DDIM):
-    def __init__(self, timesteps=1000, beta_schedule='linear'):
-        super().__init__(timesteps, beta_schedule)
-        
-    @torch.no_grad()
-    def sample(
-        self,
-        model: nn.Module,
-        image_size,
-        batch_size=8,
-        channels=3,
-        n_steps=50,
-        taylor_ratio=0.8,
-        taylor_order=2,
-        eta=0.0,
-        clip_denoised=True,
-        min_model_steps=3
-    ):
-        
-        device = next(model.parameters()).device
-        shape = (batch_size, channels, image_size, image_size)
-
-        total_steps = n_steps
-        n_model_steps = max(min_model_steps, round(total_steps * (1.0 - taylor_ratio)))
-        n_model_steps = min(n_model_steps, total_steps)
-
-        # Timestep schedule
-        step_indices = torch.linspace(0, self.timesteps - 1, total_steps, dtype=torch.long, device=device)
-        timesteps = torch.flip(step_indices, dims=[0])
-
-        # Select anchor steps for model evaluation
-        if n_model_steps == total_steps:
-            anchor_ids = set(range(total_steps))
-        else:
-            anchor_ids = set(
-                int(i * (total_steps - 1) / (n_model_steps - 1)) 
-                for i in range(n_model_steps)
-            )
-
-        # Initialize
-        img = torch.randn(shape, device=device)
-        imgs = [img]
-        noise_cache = []
-
-        for i in tqdm(range(total_steps - 1), desc='TaylorSeer sampling'):
-            t = timesteps[i].item()
-            t_next = timesteps[i + 1].item()
-
-            if i in anchor_ids:
-                # Run model and cache output
-                t_batch = torch.full((batch_size,), t, device=device, dtype=torch.long)
-                pred_noise = model(img, t_batch)
-                noise_cache.append(pred_noise.cpu())
-            else:
-                # Predict via Taylor
-                if len(noise_cache) >= taylor_order + 1:
-                    pred_noise = taylor_extrapolate(
-                        features_cache=noise_cache[-(taylor_order + 1):],
-                        order=taylor_order,
-                        device=device
-                    )
-
-            img = self.ddim_step(
-                img,
-                t,
-                t_next,
-                eta,
-                clip_denoised,
-                pred_noise=pred_noise  
-            )
             imgs.append(img)
 
         return imgs

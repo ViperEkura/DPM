@@ -2,10 +2,10 @@ import os
 import torch
 import numpy as np
 from matplotlib import pyplot as plt
-from dpm.diffuser import DDIM, GaussianDiffusion, TaylorSeer
+from dpm.diffuser import DDIM, GaussianDiffusion
 from dpm.modules import UNet
 
-timesteps = 500
+timesteps = 1000
 CHECKPOINT_PATH = "checkpoints/diffusion_model.pth"
 
 def load_checkpoint():
@@ -96,20 +96,6 @@ def generate_images(model, sampler_type, batch_size=64, device='cuda'):
                 'eta': 0.0
             }
         },
-        'taylor': {
-            'class': TaylorSeer,
-            'params': {'timesteps': timesteps},
-            'sample_params': {
-                'image_size': 28,
-                'batch_size': batch_size,
-                'channels': 1,
-                'n_steps': 50,
-                'taylor_ratio': 0.5,
-                'taylor_order': 2,
-                'eta': 0.0,
-                'min_model_steps': 3
-            }
-        }
     }
     
     config = sampler_configs[sampler_type.lower()]
@@ -349,18 +335,7 @@ def main():
         return
     
     model = model.to(device)
-    
-    # 在这里选择要比较的两种采样方法
-    # 可选: 'ddpm', 'ddim', 'taylor'
-    
-    print("\n选择要比较的采样方法:")
-    print("1. DDPM vs DDIM")
-    print("2. DDPM vs Taylor")
-    print("3. DDIM vs Taylor")
-
-    
-
-    sampler1, sampler2 = 'ddim', 'taylor'
+    sampler1, sampler2 = 'ddpm', 'ddim'
     
     # 执行比较
     results = compare_samplers_psnr(

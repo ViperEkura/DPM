@@ -5,3 +5,6 @@ __pycache__/
 *-ubyte
 *-ubyte.gz
 *.pth
+
+#img
+*.png

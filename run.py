@@ -3,17 +3,17 @@ import torch
 
 from matplotlib import pyplot as plt
 from torchvision import datasets, transforms
-from dpm.diffuser import DDIM, GaussianDiffusion, TaylorSeer
+from dpm.diffuser import DDIM, GaussianDiffusion
 from dpm.modules import UNet
 
 
 CHECKPOINT_PATH = "checkpoints/diffusion_model.pth"
-timesteps = 500
+timesteps = 1000
 
 
 def train():
-    batch_size = 64
-    epochs = 10
+    batch_size = 128
+    epochs = 5
     
     transform = transforms.Compose([
         transforms.ToTensor(),
@@ -34,7 +34,7 @@ def train():
         attention_resolutions=[]
     )
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
     gaussian_diffusion = GaussianDiffusion(timesteps=timesteps)
 
     # train
@@ -122,19 +122,8 @@ def show(model, sampler_type='ddim'):
             eta=0.0
         )
     else:
-        n_steps_ddim = 50 
-        sampler = TaylorSeer(timesteps=timesteps)
-        generated_images = sampler.sample(
-            model, 
-            28, 
-            batch_size=batch_size, 
-            channels=1,
-            n_steps=n_steps_ddim,
-            taylor_ratio=0.5,
-            taylor_order=2,
-            eta=0.0,
-            min_model_steps=3
-        )
+        raise NotImplementedError
+
     
     print(f"Generated {len(generated_images)} steps of images")
 
@@ -155,7 +144,6 @@ def show(model, sampler_type='ddim'):
     plt.suptitle(f"Generated MNIST Digits ({sampler_type.upper()} Sampling)", fontsize=16)
     plt.savefig(f"generated_images_{sampler_type}.png", dpi=150, bbox_inches='tight')
 
-    # 显示去噪步骤
     print("Showing denoising steps...")
     fig = plt.figure(figsize=(16, 10), constrained_layout=True)
     nrows = 8   # sample
@@ -178,11 +166,9 @@ def show(model, sampler_type='ddim'):
             
             if row == 0:
                 if sampler_type.lower() == 'ddpm':
-                    # DDPM: 显示实际的时间步（从T到0）
                     actual_t = timesteps - (t_idx * timesteps // len(generated_images))
                     step_info = f"t={actual_t}"
                 else:
-                    # DDIM: 显示步骤索引
                     step_info = f"step={t_idx}"
                 f_ax.set_title(step_info, fontsize=8)
     
@@ -190,7 +176,6 @@ def show(model, sampler_type='ddim'):
     plt.savefig(f"denoising_steps_{sampler_type}.png", dpi=150, bbox_inches='tight')
 
 
-    # 打印采样信息
     print(f"\nSampling completed using {sampler_type.upper()}:")
     print(f"- Total steps: {len(generated_images)}")
     print(f"- Final image shape: {final_images.shape}")
