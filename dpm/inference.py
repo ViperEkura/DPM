@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from torch import Tensor
 from typing import Dict, List, Optional
@@ -8,11 +7,13 @@ from dpm.modules import UNet, timestep_embedding
 
 
 class UnetWrapper(nn.Module):
-    def __init__(self, unet_model: UNet, cache_interval=0, init_fwd_step=0):
+    def __init__(self, unet_model: UNet, fwd_interval=0, cache_begin=0, cache_end=100000):
         super().__init__()
         self.unet = unet_model
-        self.cache_interval = cache_interval
-        self.fwd_step = init_fwd_step
+        self.fwd_interval = fwd_interval
+        self.cache_begin = cache_begin
+        self.cache_end = cache_end
+        self.fwd_step = 0
 
     def _forward_full(self, x: Tensor, timesteps: Tensor):
         hs = []
@@ -39,11 +40,13 @@ class UnetWrapper(nn.Module):
     
     
     def forward(self, x: Tensor, timesteps: Tensor):
+        in_cache_range = (self.fwd_step >= self.cache_begin) and (self.fwd_step < self.cache_end)
+        in_anchor = (self.fwd_step % self.fwd_interval == 0)
         
-        if self.fwd_step % self.cache_interval == 0:
-            res = self._forward_full(x, timesteps)
-        else:
+        if in_cache_range and not in_anchor:
             res = self._forward_with_cache(x, timesteps)
+        else:
+            res = self._forward_full(x, timesteps)
             
         self.fwd_step += 1
         return res
@@ -53,12 +56,13 @@ class DeepCacheWrapper(UnetWrapper):
     def __init__(
         self, 
         unet_model: UNet, 
-        cache_interval:int=0, 
-        init_fwd_step:int=0, 
+        fwd_interval:int=0, 
+        cache_begin:int=0, 
+        cache_end:int=100000,
         cache_layer_list:Optional[List]=None
     ):
         
-        super().__init__(unet_model, cache_interval, init_fwd_step)
+        super().__init__(unet_model, fwd_interval, cache_begin, cache_end)
         self.cache_layer_list = cache_layer_list
         self.cache_features: Dict[int, Tensor] = {}
         self._init_cache_ids()
