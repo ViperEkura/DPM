@@ -52,13 +52,19 @@ $$
 x_s = \sqrt{\frac{\bar{\alpha}_s}{\bar{\alpha}_t}} x_t + \left( \sqrt{1 - \bar{\alpha}_s} - \sqrt{\frac{\bar{\alpha}_s}{\bar{\alpha}_t}} \sqrt{1 - \bar{\alpha}_t} \right) \epsilon
 $$
 
-但实际中 $\epsilon$ 未知，我们用神经网络预测它：$\epsilon \approx \epsilon_\theta(x_t, t)$，并由此估计：
+但实际中 $\epsilon$ 未知，我们用神经网络预测它: $\epsilon \approx \epsilon_\theta(x_t, t)$，并由此估计：
 
 $$
 \hat{x}_0 = \frac{x_t - \sqrt{1 - \bar{\alpha}_t} \epsilon_\theta(x_t, t)}{\sqrt{\bar{\alpha}_t}}
 $$
 
-然后代入 $x_s = \sqrt{\bar{\alpha}_s} \hat{x}_0 + \sqrt{1 - \bar{\alpha}_s} \epsilon_\theta(x_t, t)$，就得到从 $x_t$ **一步跳到 $x_s$** 的更新规则：
+然后代入 
+
+$$
+x_s = \sqrt{\bar{\alpha}_s} \hat{x}_0 + \sqrt{1 - \bar{\alpha}_s} \epsilon_\theta(x_t, t)
+$$
+
+就得到从 $x_t$ **一步跳到 $x_s$** 的更新规则：
 
 $$
 \boxed{
