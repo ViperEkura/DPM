@@ -93,13 +93,16 @@ def load_checkpoint():
     print(f"Checkpoint loaded successfully (timesteps: {checkpoint.get('timesteps', 'N/A')})")
     return model
 
-def show(model, sampler_type='ddim'):
+def show(model, sampler_type='ddim', cache_type="none"):
     torch.manual_seed(42)
+    batch_size = 64
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = DeepCacheWrapper(model, cache_interval=4)
+    
+    if cache_type == "deepcache":
+        model = DeepCacheWrapper(model, cache_interval=4)
+        
     model = model.to(device)
     
-    batch_size = 64
     
     if sampler_type.lower() == 'ddpm':
         print(f"Using DDPM sampler with {timesteps} steps...")
@@ -143,7 +146,7 @@ def show(model, sampler_type='ddim'):
             f_ax.axis("off")
     
     plt.suptitle(f"Generated MNIST Digits ({sampler_type.upper()} Sampling)", fontsize=16)
-    plt.savefig(f"generated_images_{sampler_type}.png", dpi=150, bbox_inches='tight')
+    plt.savefig(f"generated_images_{sampler_type}_{cache_type}.png", dpi=150, bbox_inches='tight')
 
     print("Showing denoising steps...")
     fig = plt.figure(figsize=(16, 10), constrained_layout=True)
@@ -173,8 +176,8 @@ def show(model, sampler_type='ddim'):
                     step_info = f"step={t_idx}"
                 f_ax.set_title(step_info, fontsize=8)
     
-    plt.suptitle(f"{sampler_type.upper()} Denoising Steps (8 samples × 16 timesteps)", fontsize=16)
-    plt.savefig(f"denoising_steps_{sampler_type}.png", dpi=150, bbox_inches='tight')
+    plt.suptitle(f"{sampler_type.upper()} with cache {cache_type} Denoising Steps (8 samples × 16 timesteps)", fontsize=16)
+    plt.savefig(f"denoising_steps_{sampler_type}_{cache_type}.png", dpi=150, bbox_inches='tight')
 
 
     print(f"\nSampling completed using {sampler_type.upper()}:")
@@ -190,7 +193,7 @@ def main():
     else:
         print("Checkpoint loaded. Skipping training.")
 
-    show(model, "ddpm")
+    show(model, "ddim", "deepcache")
 
 if __name__ == "__main__":
     main()
