@@ -75,7 +75,14 @@ def generate_images_with_cache(model, sampler_type, cache_type='none', batch_siz
         Generated images tensor of shape (batch_size, 1, 28, 28).
     """
     if cache_type == "deepcache":
-        model = DeepCacheWrapper(model, cache_interval=4)
+        if sampler_type == "ddpm":
+            cache_begin = 0
+            cache_end = 500
+        if sampler_type == "ddim":
+            cache_begin = 0
+            cache_end = 25
+            
+        model = DeepCacheWrapper(model, fwd_interval=4, cache_begin=cache_begin, cache_end=cache_end)
     
     model.eval()
     

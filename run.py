@@ -99,7 +99,7 @@ def show(model, sampler_type='ddim', cache_type="none"):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     if cache_type == "deepcache":
-        model = DeepCacheWrapper(model, cache_interval=4)
+        model = DeepCacheWrapper(model, fwd_interval=4)
         
     model = model.to(device)
     

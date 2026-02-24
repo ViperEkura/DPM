@@ -36,7 +36,7 @@ def get_trajectory(model, sampler_type, cache_type='none', batch_size=1, device=
     """
     torch.manual_seed(seed)
     if cache_type == "deepcache":
-        model = DeepCacheWrapper(model, cache_interval=4)
+        model = DeepCacheWrapper(model, fwd_interval=4)
     model.eval()
 
     if sampler_type.lower() == 'ddpm':
