@@ -1,5 +1,5 @@
 from dpm.diffuser import GaussianDiffusion, DDIM
-from dpm.modules import UNet
+from dpm.modules.unet import UNet
 
 __all__ = [
     'GaussianDiffusion',
