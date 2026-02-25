@@ -58,10 +58,38 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
 
 
 class PatchEmbed(nn.Module):
+    """
+    Image to Patch Embedding Layer for Vision Transformers (ViT)
+    """
     
-    def __init__(self,input_size, patch_size, in_channels, hidden_size, bias=True):
-        pass
+    def __init__(self, input_size: int, patch_size: int, in_channels: int, hidden_size: int, bias: bool = True):
+        super().__init__()
+        # Calculate number of patches along one dimension
+        num_patches_per_side = input_size // patch_size
+        self.num_patches = num_patches_per_side ** 2  # Total patches: (H/P) * (W/P)
+        self.patch_size = (patch_size, patch_size)
+        
+        # Uses stride=patch_size to create non-overlapping patches
+        self.proj = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=hidden_size,
+            kernel_size=patch_size,
+            stride=patch_size,
+            bias=bias
+        )
     
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass: Convert image to patch embeddings.
+        """
+        # Apply convolution to create patches (output: [batch, hidden_size, num_patches_h, num_patches_w])
+        x = self.proj(x)
+        
+        # Reshape to [batch, hidden_size, num_patches] 
+        # and then transpose to [batch, num_patches, hidden_size]
+        x = x.flatten(2).transpose(1, 2)
+        
+        return x
     
 
 class TimestepEmbedder(nn.Module):
@@ -138,7 +166,7 @@ class Attention(nn.Module):
     def __init__(self, hidden_size, num_heads, qkv_bias=True):
         super().__init__()
         self.num_heads = num_heads
-        self.hiudden_size = hidden_size
+        self.hidden_size = hidden_size
         self.q_proj = nn.Linear(hidden_size, hidden_size, bias=qkv_bias)
         self.k_proj = nn.Linear(hidden_size, hidden_size, bias=qkv_bias)
         self.v_proj = nn.Linear(hidden_size, hidden_size, bias=qkv_bias)
