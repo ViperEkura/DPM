@@ -1,6 +1,8 @@
 import os
 import torch
 import numpy as np
+import seaborn as sns
+
 from matplotlib import pyplot as plt
 from dpm.diffuser import DDIM, GaussianDiffusion
 from dpm.inference import DeepCacheWrapper
@@ -74,15 +76,8 @@ def generate_images_with_cache(model, sampler_type, cache_type='none', batch_siz
     Returns:
         Generated images tensor of shape (batch_size, 1, 28, 28).
     """
-    if cache_type == "deepcache":
-        if sampler_type == "ddpm":
-            cache_begin = 0
-            cache_end = 500
-        if sampler_type == "ddim":
-            cache_begin = 0
-            cache_end = 25
-            
-        model = DeepCacheWrapper(model, fwd_interval=4, cache_begin=cache_begin, cache_end=cache_end)
+    if cache_type == "deepcache":            
+        model = DeepCacheWrapper(model, fwd_interval=4)
     
     model.eval()
     
@@ -161,52 +156,45 @@ def main():
             all_gen_images.append(gen_images.cpu())  # Move to CPU for PSNR computation
             label = f"{sampler.upper()}\n({cache_type})"
             labels.append(label)
-            
-            # Optional: Save sample grid of generated images
-            fig = plt.figure(figsize=(12, 12), constrained_layout=True)
-            gs = fig.add_gridspec(8, 8)
-            final_images = gen_images.cpu()
-            imgs = final_images.reshape(8, 8, 28, 28)
-            for n_row in range(8):
-                for n_col in range(8):
-                    ax = fig.add_subplot(gs[n_row, n_col])
-                    img = (imgs[n_row, n_col] + 1.0) * 127.5  # [-1,1] -> [0,255]
-                    ax.imshow(img.squeeze(), cmap="gray")
-                    ax.axis("off")
-            plt.suptitle(f"Generated MNIST ({sampler.upper()}, Cache: {cache_type})", fontsize=16)
-            plt.savefig(f"generated_images_{sampler}_{cache_type}.png", dpi=150, bbox_inches='tight')
-            plt.close(fig)
 
     # Compute PSNR matrix across all configurations
     print("Computing PSNR matrix between all configurations...")
     psnr_matrix = compute_psnr_matrix(all_gen_images)
     
-    # Plot heatmap of PSNR matrix
-    fig, ax = plt.subplots(figsize=(6, 5))
-    im = ax.imshow(psnr_matrix, cmap="viridis")
-    
-    # Add colorbar
-    cbar = ax.figure.colorbar(im, ax=ax)
-    cbar.ax.set_ylabel("Mean PSNR (dB)", rotation=-90, va="bottom")
-    
-    # Annotate each cell with PSNR value
-    for i in range(len(labels)):
-        for j in range(len(labels)):
-            text_color = "white" if psnr_matrix[i, j] < (psnr_matrix.max() + psnr_matrix.min()) / 2 else "black"
-            ax.text(j, i, f"{psnr_matrix[i, j]:.1f}",
-                    ha="center", va="center", color=text_color, fontsize=10)
-    
-    # Set ticks and labels
-    ax.set_xticks(np.arange(len(labels)))
-    ax.set_yticks(np.arange(len(labels)))
-    ax.set_xticklabels(labels)
-    ax.set_yticklabels(labels)
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-    
-    ax.set_title("PSNR Matrix Between Generation Configurations", fontsize=14)
-    fig.tight_layout()
-    plt.savefig("psnr_matrix.png", dpi=200, bbox_inches='tight')
+    # 1. heatmap
+    plt.figure(figsize=(6, 5))
+    sns.set_theme(style="white")
+    ax = sns.heatmap(
+        psnr_matrix,
+        vmax=50,
+        vmin=0,
+        annot=True, fmt=".1f", cmap="viridis", square=True,
+        linewidths=1, linecolor='white',
+        cbar_kws={"shrink": 0.8, "label": "Mean PSNR (dB)"},
+    )
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=11)
+    ax.set_yticklabels(labels, rotation=0, fontsize=11)
+    plt.title("PSNR Matrix Between Generation Configurations", fontsize=14, pad=20)
+    plt.tight_layout()
+    plt.savefig("psnr_matrix.png", dpi=300, bbox_inches="tight")
+    plt.show()
+
+    # 2. sample comparison
+    fig, axes = plt.subplots(len(all_gen_images), 8, figsize=(12, 6))
+    fig.subplots_adjust(hspace=0.1, wspace=0.1)
+    for row, (imgs, label) in enumerate(zip(all_gen_images, labels)):
+        for col in range(8):
+            ax = axes[row, col]
+            img = (imgs[col, 0].cpu().numpy() + 1) / 2
+            ax.imshow(img, cmap="gray")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            if col == 0:
+                ax.set_ylabel(label, fontsize=12, rotation=0, ha="right", va="center")
+    plt.suptitle("Generated MNIST Samples by Configuration", fontsize=16, y=1.02)
+    plt.savefig("sample_comparison.png", dpi=300, bbox_inches="tight")
     plt.show()
 
 if __name__ == "__main__":
-    main()
+    with torch.autocast("cuda", torch.bfloat16):
+        main()
